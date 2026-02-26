@@ -515,10 +515,12 @@ class CO2MonitorApp:
         humid_path = os.path.join(base, "humidity.txt")
         alert_path = os.path.join(base, "alert.txt")
 
+        fail_count = 0
+
         while not self.stop_event.is_set():
             # Re-read settings each cycle (changes apply without restart)
             config_ready = threading.Event()
-            self.root.after(0, lambda: (self._save_config_from_ui(), config_ready.set()))
+            self.root.after(0, lambda ev=config_ready: (self._save_config_from_ui(), ev.set()))
             config_ready.wait(timeout=2)
             threshold = self.config["co2_threshold"]
             interval = self.config["scan_interval"]
@@ -529,6 +531,8 @@ class CO2MonitorApp:
             enable_humid_alert = self.config.get("enable_humidity_alert", False)
             humid_high = self.config.get("humidity_high_threshold", 70)
             humid_low = self.config.get("humidity_low_threshold", 30)
+
+            scanner = None
             try:
                 result_holder = [None]
 
@@ -541,12 +545,19 @@ class CO2MonitorApp:
                         result_holder[0] = parsed
 
                 scanner = BleakScanner(detection_callback=callback)
-                loop.run_until_complete(scanner.start())
-                loop.run_until_complete(asyncio.sleep(interval))
-                loop.run_until_complete(scanner.stop())
+
+                async def scan_with_timeout():
+                    await scanner.start()
+                    await asyncio.sleep(interval)
+                    await scanner.stop()
+
+                loop.run_until_complete(
+                    asyncio.wait_for(scan_with_timeout(), timeout=interval + 15)
+                )
 
                 result = result_holder[0]
                 if result:
+                    fail_count = 0
                     co2 = result["co2"]
                     temp = result["temperature"]
                     humid = result["humidity"]
@@ -585,12 +596,48 @@ class CO2MonitorApp:
                     self.root.after(0, lambda c=co2, t=temp, h=humid,
                                     n=now, a=alert_text:
                                     self._update_display(c, t, h, n, a))
+                else:
+                    fail_count += 1
+
+            except asyncio.TimeoutError:
+                fail_count += 1
+                # Force stop scanner on timeout
+                if scanner:
+                    try:
+                        loop.run_until_complete(scanner.stop())
+                    except Exception:
+                        pass
+                self.root.after(0, lambda fc=fail_count:
+                    self.status_label.configure(
+                        text=f"スキャンタイムアウト (リトライ {fc}回目)"))
 
             except Exception as e:
+                fail_count += 1
+                if scanner:
+                    try:
+                        loop.run_until_complete(scanner.stop())
+                    except Exception:
+                        pass
                 self.root.after(0, lambda err=str(e):
                     self.status_label.configure(text=f"エラー: {err}"))
 
-        loop.close()
+            # If too many failures, recreate event loop to reset BLE state
+            if fail_count >= 5:
+                fail_count = 0
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self.root.after(0, lambda:
+                    self.status_label.configure(
+                        text="BLEリセット中... 次のサイクルで復帰します"))
+
+        try:
+            loop.close()
+        except Exception:
+            pass
 
     def _update_display(self, co2, temp, humid, time_str, alert_text):
         if co2 < 600:
