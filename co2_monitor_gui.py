@@ -501,17 +501,7 @@ class CO2MonitorApp:
         asyncio.set_event_loop(loop)
 
         mac = self.config["device_mac"].upper()
-        threshold = self.config["co2_threshold"]
-        interval = self.config["scan_interval"]
         output_dir = self.config.get("output_dir", "").strip()
-
-        enable_co2_alert = self.config.get("enable_co2_alert", True)
-        enable_temp_alert = self.config.get("enable_temp_alert", False)
-        temp_high = self.config.get("temp_high_threshold", 30.0)
-        temp_low = self.config.get("temp_low_threshold", 16.0)
-        enable_humid_alert = self.config.get("enable_humidity_alert", False)
-        humid_high = self.config.get("humidity_high_threshold", 70)
-        humid_low = self.config.get("humidity_low_threshold", 30)
 
         if output_dir:
             base = output_dir
@@ -526,6 +516,19 @@ class CO2MonitorApp:
         alert_path = os.path.join(base, "alert.txt")
 
         while not self.stop_event.is_set():
+            # Re-read settings each cycle (changes apply without restart)
+            config_ready = threading.Event()
+            self.root.after(0, lambda: (self._save_config_from_ui(), config_ready.set()))
+            config_ready.wait(timeout=2)
+            threshold = self.config["co2_threshold"]
+            interval = self.config["scan_interval"]
+            enable_co2_alert = self.config.get("enable_co2_alert", True)
+            enable_temp_alert = self.config.get("enable_temp_alert", False)
+            temp_high = self.config.get("temp_high_threshold", 30.0)
+            temp_low = self.config.get("temp_low_threshold", 16.0)
+            enable_humid_alert = self.config.get("enable_humidity_alert", False)
+            humid_high = self.config.get("humidity_high_threshold", 70)
+            humid_low = self.config.get("humidity_low_threshold", 30)
             try:
                 result_holder = [None]
 
