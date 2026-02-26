@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables (contains credentials)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Output files (generated at runtime)
+co2_level.txt
+temperature.txt
+humidity.txt
+alert.txt
+config.json
+
+# IDE
+.vscode/
+.idea/
